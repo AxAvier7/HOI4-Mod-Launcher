@@ -4,18 +4,28 @@ A lightweight alternative mod launcher for **Hearts of Iron IV**. Enable and
 disable your mods from a clean dark-themed interface, without the official
 Paradox launcher.
 
-![Downloads](https://img.shields.io/badge/download-latest%20release-blue)
-![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+[![Download](https://img.shields.io/badge/download-latest%20release-blue)](https://github.com/AxAvier7/HOI4-Mod-Launcher/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](https://github.com/AxAvier7/HOI4-Mod-Launcher/releases/latest)
 
 ---
 
 ## Download
 
-Grab the latest release from the
-[Releases page](../../releases/latest) and download the **`.exe`** in the
-Assets section (GitHub saves it as `HOI4.Mod.Launcher.exe`).
+Go to the [latest release page](https://github.com/AxAvier7/HOI4-Mod-Launcher/releases/latest)
+and download the **`.exe`** in the Assets section (GitHub saves it as
+`HOI4.Mod.Launcher.exe`).
 
 You do **not** need to install Python. It is a single self-contained file.
+
+<details>
+<summary>Direct download link</summary>
+
+[**HOI4.Mod.Launcher.exe**](https://github.com/AxAvier7/HOI4-Mod-Launcher/releases/latest/download/HOI4.Mod.Launcher.exe)
+(28.6 MB)
+
+Read the SmartScreen note below before running it.
+
+</details>
 
 ### First launch (Windows SmartScreen)
 
