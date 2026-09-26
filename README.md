@@ -11,6 +11,7 @@ A lightweight alternative mod launcher for **Hearts of Iron IV**. Manage your mo
 - **Launch Game** - Launch HOI4 directly from the launcher (auto-detects Steam paths or configure manually).
 - **Bilingual UI** - Switch between Spanish and English from the Settings menu.
 - **Resizable Layout** - Split-screen design with a draggable divider between the mod list and details panel.
+- **Played Mods History** - A dedicated tab shows all the mods you have saved/enabled, with the last time you played each one.
 - **Persistent Settings** - Remembers your game path, documents path, and language between sessions.
 
 ## Requirements
