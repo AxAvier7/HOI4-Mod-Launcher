@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """HOI4 Mod Launcher - Alternativo"""
 
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -11,12 +13,17 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from PIL import Image, ImageTk
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
 CONFIG_PATH = BASE_DIR / "config.json"
 
 DEFAULT_DOCS = Path.home() / "Documents" / "Paradox Interactive" / "Hearts of Iron IV"
 MOD_DIR_NAME = "mod"
 JSON_NAME = "dlc_load.json"
+THUMBS_DIR_NAME = "thumbs"
 
 THUMB_SIZE = 48
 BIG_THUMB_SIZE = 96
@@ -198,6 +205,15 @@ def _find_thumbnail(mod_dir, info):
     return None
 
 
+def _thumb_file_name(key, src_path):
+    """Builds a safe, collision-free filename for a cached thumbnail."""
+    ext = Path(src_path).suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"):
+        ext = ".png"
+    digest = hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:12]
+    return f"{digest}{ext}"
+
+
 def _format_time(ts):
     try:
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(ts)))
@@ -236,6 +252,7 @@ class ModLauncher:
         self.current_detail_idx = None
         self.thumb_refs = []
         self._list_canvases = []
+        self.thumbs_dir = BASE_DIR / THUMBS_DIR_NAME
 
         self.played_items = []
         self.played_thumb_refs = []
@@ -553,28 +570,85 @@ class ModLauncher:
     def _history(self):
         return self.config.setdefault("play_history", [])
 
+    def _store_thumbnail(self, key, thumb_path):
+        """Copies a mod's thumbnail into the launcher folder so it survives
+        the mod being deleted. Returns the cached path, or "" on failure."""
+        if not thumb_path:
+            return ""
+        src = Path(thumb_path)
+        if not src.is_file():
+            return ""
+        try:
+            self.thumbs_dir.mkdir(parents=True, exist_ok=True)
+            dest = self.thumbs_dir / _thumb_file_name(key, thumb_path)
+            if os.path.normcase(os.path.abspath(src)) != os.path.normcase(os.path.abspath(dest)):
+                shutil.copy2(src, dest)
+            return str(dest)
+        except Exception:
+            return ""
+
+    def _resolve_thumbnail(self, entry, mod):
+        """Prefers the live thumbnail, falling back to the cached copy."""
+        for candidate in ((mod or {}).get("thumbnail"), entry.get("thumbnail")):
+            if candidate and Path(candidate).is_file():
+                return candidate
+        return None
+
     def _record_played(self, mod):
         now = time.time()
         hist = self._history()
         entry_key = os.path.basename(mod["filepath"])
+        cached = self._store_thumbnail(entry_key, mod.get("thumbnail"))
         for e in hist:
             if e.get("key") == entry_key:
                 e["timestamp"] = now
                 e["name"] = mod["name"]
+                if cached:
+                    e["thumbnail"] = cached
                 return
-        hist.append({
+        entry = {
             "key": entry_key,
             "name": mod["name"],
             "timestamp": now,
-        })
+        }
+        if cached:
+            entry["thumbnail"] = cached
+        hist.append(entry)
+
+    def _cache_missing_thumbnails(self, mods_by_key):
+        """Backs up thumbnails for history entries recorded before caching
+        existed, so older entries don't lose their image."""
+        changed = False
+        for e in self._history():
+            if e.get("thumbnail") and Path(e["thumbnail"]).is_file():
+                continue
+            mod = mods_by_key.get(e.get("key"))
+            if not mod or not mod.get("thumbnail"):
+                continue
+            cached = self._store_thumbnail(e["key"], mod["thumbnail"])
+            if cached:
+                e["thumbnail"] = cached
+                changed = True
+        if changed:
+            save_config(self.config)
 
     def _clear_history(self):
         if messagebox.askyesno(self.t("clear_history"),
                                self.t("no_played_detail")):
             self.config["play_history"] = []
             save_config(self.config)
+            self._purge_thumbnails()
             self._played_loaded = False
             self._load_played()
+
+    def _purge_thumbnails(self):
+        try:
+            if self.thumbs_dir.is_dir():
+                for f in self.thumbs_dir.iterdir():
+                    if f.is_file():
+                        f.unlink()
+        except Exception:
+            pass
 
     def _load_played(self):
         panel = self.played_panel
@@ -589,10 +663,12 @@ class ModLauncher:
         for mod in scan_mods(self.mod_dir):
             mods_by_key.setdefault(os.path.basename(mod["filepath"]), mod)
 
+        self._cache_missing_thumbnails(mods_by_key)
+
         self.played_items = []
         for e in reversed(sorted(hist, key=lambda x: x.get("timestamp", 0))):
             mod = mods_by_key.get(e.get("key"))
-            self.played_items.append((e, mod))
+            self.played_items.append((e, mod, self._resolve_thumbnail(e, mod)))
 
         if not self.played_items:
             panel["detail_title"].config(text=self.t("no_played"))
@@ -600,11 +676,11 @@ class ModLauncher:
             panel["detail_tags"].config(text="")
             return
 
-        for idx, (entry, mod) in enumerate(self.played_items):
+        for idx, (entry, mod, thumb_path) in enumerate(self.played_items):
             row = tk.Frame(panel["mod_frame"], bg="#1a1a2e", pady=4)
             row.pack(fill="x", padx=4)
 
-            thumb_path = mod.get("thumbnail") if mod else None
+            lbl = None
             if thumb_path:
                 try:
                     img = Image.open(thumb_path)
@@ -615,8 +691,6 @@ class ModLauncher:
                     lbl.pack(side="left", padx=(0, 8))
                 except Exception:
                     lbl = None
-            else:
-                lbl = None
 
             name = entry.get("name") or os.path.splitext(entry["key"])[0]
             sub = f"{self.t('played_at')}: {_format_time(entry.get('timestamp'))}"
@@ -640,7 +714,7 @@ class ModLauncher:
     def _select_played(self, idx):
         if idx < len(self.played_items):
             self.current_played_idx = idx
-            entry, mod = self.played_items[idx]
+            entry, mod, _thumb = self.played_items[idx]
             panel = self.played_panel
 
             name = entry.get("name") or os.path.splitext(entry["key"])[0]

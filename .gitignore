@@ -1,4 +1,33 @@
+# --- Python ---
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- Configuracion personal (contiene rutas de tu usuario y tu historial) ---
 config.json
+*.local.json
+
+# --- PyInstaller ---
+build/
+dist/
+*.spec
+
+# --- Miniaturas cacheadas del historial de jugados ---
+thumbs/
+
+# --- Editores / SO ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs y temporales ---
+*.log
+*.tmp
+*.bak
+~$*
