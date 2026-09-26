@@ -12,8 +12,8 @@ Paradox launcher.
 ## Download
 
 Grab the latest release from the
-[Releases page](../../releases/latest) and download
-**`HOI4 Mod Launcher.exe`**.
+[Releases page](../../releases/latest) and download the **`.exe`** in the
+Assets section (GitHub saves it as `HOI4.Mod.Launcher.exe`).
 
 You do **not** need to install Python. It is a single self-contained file.
 
