@@ -76,6 +76,8 @@ The launcher works out of the box for most people. To change anything:
 - **Launch the game** — start HOI4 straight from the launcher.
 - **Played mods history** — a second tab remembers every mod you have saved,
   with the date you last played it.
+- **Error log viewer** — a third tab reads `logs/error.log` so you can spot
+  script, GFX or missing-asset errors caused by your mods.
 - **Bilingual** — English and Spanish, switchable at any time.
 - **Resizable layout** — drag the divider between the mod list and the details
   panel.

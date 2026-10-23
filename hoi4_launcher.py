@@ -24,6 +24,11 @@ DEFAULT_DOCS = Path.home() / "Documents" / "Paradox Interactive" / "Hearts of Ir
 MOD_DIR_NAME = "mod"
 JSON_NAME = "dlc_load.json"
 THUMBS_DIR_NAME = "thumbs"
+LOG_DIR_NAME = "logs"
+LOG_FILE_NAME = "error.log"
+
+MAX_LOG_LINES = 5000
+MAX_LOG_BYTES = 5 * 1024 * 1024
 
 THUMB_SIZE = 48
 BIG_THUMB_SIZE = 96
@@ -62,6 +67,16 @@ LOCALES = {
         "no_played_detail": "Los mods que habilites y guardes apareceran aqui.",
         "played_at": "Jugado",
         "clear_history": "Limpiar historial",
+        "tab_logs": "Errores",
+        "log_reload": "Recargar",
+        "log_open_folder": "Abrir carpeta",
+        "log_filter_hint": "Filtrar:",
+        "log_no_file": "No se encontro error.log.",
+        "log_no_file_detail": "Lanza el juego al menos una vez y pulsa Recargar.\nRuta: {0}",
+        "log_empty": "El registro esta vacio.",
+        "log_read_error": "No se pudo leer el registro.",
+        "log_stats": "{0} lineas | {1} | modificado {2}",
+        "log_filtered": "{0} de {1} lineas",
     },
     "en": {
         "settings": "Settings",
@@ -96,6 +111,16 @@ LOCALES = {
         "no_played_detail": "Mods you enable and save will appear here.",
         "played_at": "Played",
         "clear_history": "Clear history",
+        "tab_logs": "Errors",
+        "log_reload": "Reload",
+        "log_open_folder": "Open folder",
+        "log_filter_hint": "Filter:",
+        "log_no_file": "error.log not found.",
+        "log_no_file_detail": "Run the game at least once, then click Reload.\nPath: {0}",
+        "log_empty": "The log is empty.",
+        "log_read_error": "Could not read the log.",
+        "log_stats": "{0} lines | {1} | modified {2}",
+        "log_filtered": "{0} of {1} lines",
     },
 }
 
@@ -246,6 +271,7 @@ class ModLauncher:
         self.game_path = self.config.get("game_path", "")
         self.mod_dir = self.docs_path / MOD_DIR_NAME
         self.dlc_path = self.docs_path / JSON_NAME
+        self.logs_path = self.docs_path / LOG_DIR_NAME / LOG_FILE_NAME
 
         self.mods = []
         self.enabled_vars = {}
@@ -258,6 +284,9 @@ class ModLauncher:
         self.played_thumb_refs = []
         self.current_played_idx = None
         self._played_loaded = False
+
+        self._log_raw = ""
+        self._log_loaded = False
 
         self.config_window = None
 
@@ -326,8 +355,12 @@ class ModLauncher:
         self.played_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.played_tab, text=self.t("tab_played"))
 
+        self.logs_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.logs_tab, text=self.t("tab_logs"))
+
         self._build_main_list(self.mods_tab)
         self._build_played_list(self.played_tab)
+        self._build_logs_tab(self.logs_tab)
 
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.root.bind_all(seq, self._on_wheel, add="+")
@@ -423,10 +456,141 @@ class ModLauncher:
 
         self.played_panel = self._build_panels(parent)
 
+    def _build_logs_tab(self, parent):
+        top = ttk.Frame(parent)
+        top.pack(fill="x", pady=(8, 4), padx=8)
+
+        self.btn_log_reload = ttk.Button(top, text=self.t("log_reload"), command=self._load_log)
+        self.btn_log_reload.pack(side="left")
+        self.btn_log_folder = ttk.Button(top, text=self.t("log_open_folder"),
+                                         command=self._open_log_folder)
+        self.btn_log_folder.pack(side="left", padx=(6, 0))
+
+        self.log_filter_var = tk.StringVar()
+        self.log_filter_var.trace_add("write", lambda *a: self._render_log())
+        self.log_filter_entry = tk.Entry(top, textvariable=self.log_filter_var, bg="#16213e",
+                                         fg="#e0e0e0", insertbackground="#e0e0e0",
+                                         font=("Segoe UI", 9), width=28)
+        self.log_filter_entry.pack(side="right")
+        self.log_filter_label = ttk.Label(top, text=self.t("log_filter_hint"))
+        self.log_filter_label.pack(side="right", padx=(0, 6))
+
+        wrap = ttk.Frame(parent)
+        wrap.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+
+        self.log_text = tk.Text(wrap, bg="#12121f", fg="#cfcfcf", insertbackground="#e0e0e0",
+                                font=("Consolas", 9), wrap="none", state="disabled",
+                                relief="flat", padx=8, pady=6)
+        yscroll = ttk.Scrollbar(wrap, orient="vertical", command=self.log_text.yview)
+        xscroll = ttk.Scrollbar(wrap, orient="horizontal", command=self.log_text.xview)
+        self.log_text.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+        wrap.rowconfigure(0, weight=1)
+        wrap.columnconfigure(0, weight=1)
+
+        self.log_text.tag_configure("err", foreground="#ff6b6b")
+        self.log_text.tag_configure("warn", foreground="#e0c060")
+
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.log_text.bind(seq, self._scroll_log, add="+")
+
+        self.log_status = ttk.Label(parent, text="", style="Status.TLabel")
+        self.log_status.pack(fill="x", padx=10, pady=(0, 4))
+
+    def _scroll_log(self, event):
+        if event.num == 4:
+            delta = -1
+        elif event.num == 5:
+            delta = 1
+        else:
+            delta = _on_wheel(event)
+        self.log_text.yview_scroll(delta, "units")
+        return "break"
+
+    def _read_log(self):
+        path = self.logs_path
+        if not path.is_file():
+            return None
+        try:
+            size = path.stat().st_size
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                if size > MAX_LOG_BYTES:
+                    f.seek(size - MAX_LOG_BYTES)
+                    f.readline()
+                return f.read()
+        except Exception:
+            return ""
+
+    def _load_log(self):
+        content = self._read_log()
+        self._log_loaded = True
+        if content is None:
+            self._log_raw = ""
+            self._show_log_message(self.t("log_no_file_detail").format(self.logs_path))
+            self.log_status.config(text=self.t("log_no_file"))
+            return
+        self._log_raw = content
+        self._render_log()
+
+    def _show_log_message(self, message):
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.insert("1.0", message)
+        self.log_text.configure(state="disabled")
+
+    def _render_log(self):
+        if not self._log_loaded:
+            return
+        query = self.log_filter_var.get().strip().lower()
+        lines = self._log_raw.splitlines()
+        total = len(lines)
+        if query:
+            lines = [ln for ln in lines if query in ln.lower()]
+        if len(lines) > MAX_LOG_LINES:
+            lines = lines[-MAX_LOG_LINES:]
+
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        for ln in lines:
+            low = ln.lower()
+            tag = "err" if "error" in low else ("warn" if "warn" in low else "")
+            self.log_text.insert("end", ln + "\n", tag)
+        self.log_text.configure(state="disabled")
+        self.log_text.see("end")
+
+        try:
+            st = self.logs_path.stat()
+            size_txt = f"{st.st_size / 1024:.0f} KB"
+            mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))
+        except Exception:
+            size_txt, mtime = "", ""
+        if query:
+            self.log_status.config(text=self.t("log_filtered").format(len(lines), total))
+        elif not self._log_raw:
+            self.log_status.config(text=self.t("log_empty"))
+        else:
+            self.log_status.config(text=self.t("log_stats").format(len(lines), size_txt, mtime))
+
+    def _open_log_folder(self):
+        folder = self.logs_path.parent
+        try:
+            if not folder.is_dir():
+                messagebox.showwarning(self.t("error_title"),
+                                       self.t("log_no_file_detail").format(self.logs_path))
+                return
+            os.startfile(str(folder))
+        except Exception as e:
+            messagebox.showerror(self.t("error_title"), str(e))
+
     def _on_tab_changed(self, event):
-        if self.notebook.index(self.notebook.select()) == 1 and not self._played_loaded:
+        idx = self.notebook.index(self.notebook.select())
+        if idx == 1 and not self._played_loaded:
             self._load_played()
             self._played_loaded = True
+        elif idx == 2:
+            self._load_log()
 
     def _update_ui_texts(self):
         self.btn_settings.config(text=self.t("settings"))
@@ -436,6 +600,12 @@ class ModLauncher:
         self.btn_clear_history.config(text=self.t("clear_history"))
         self.notebook.tab(0, text=self.t("tab_mods"))
         self.notebook.tab(1, text=self.t("tab_played"))
+        self.notebook.tab(2, text=self.t("tab_logs"))
+        self.btn_log_reload.config(text=self.t("log_reload"))
+        self.btn_log_folder.config(text=self.t("log_open_folder"))
+        self.log_filter_label.config(text=self.t("log_filter_hint"))
+        if self._log_loaded:
+            self._render_log()
         for panel in (self.main_panel, self.played_panel):
             panel["detail_title"].config(text=self.t("select_hint"))
         self._update_status()
@@ -840,6 +1010,11 @@ class ModLauncher:
             self.game_path = clean_path(game_var.get())
             self.mod_dir = self.docs_path / MOD_DIR_NAME
             self.dlc_path = self.docs_path / JSON_NAME
+            self.logs_path = self.docs_path / LOG_DIR_NAME / LOG_FILE_NAME
+            self._log_loaded = False
+            self._log_raw = ""
+            if hasattr(self, "log_filter_var"):
+                self.log_filter_var.set("")
             self.config["docs_path"] = str(self.docs_path)
             self.config["game_path"] = self.game_path
             self.config["language"] = new_lang
